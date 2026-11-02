@@ -142,3 +142,7 @@ dist
 .yarn/install-state.gz
 .pnp.*
 .DS_Store
+
+# AWS Lambda / SAM
+.aws-sam/
+samconfig.toml

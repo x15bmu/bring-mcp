@@ -259,3 +259,60 @@ npm run build
 - 📦 Use batch operations for efficiency when working with multiple items.
 
 Happy coding with MCP and Bring! 🎉
+
+## Deploy to AWS Lambda (remote MCP for ChatGPT / Claude)
+
+The Lambda build serves the same tools over **Streamable HTTP** (stateless, JSON responses) behind a Lambda Function URL.
+Because ChatGPT and Claude require OAuth for remote MCP servers, the Lambda includes a small, database-free OAuth 2.1
+authorization server (PKCE S256, dynamic client registration, RFC 8707 `resource`, RFC 9207 `iss`). Authorization is a
+single **passphrase** page; codes and tokens are signed JWTs.
+
+### 1. Bring! account
+
+Bring! has no OAuth, and accounts created via "Sign in with Google" have no password. Create a **second Bring! account**
+with an email and password, then invite it to the lists you want to expose from your main account. The Lambda signs in as
+that account. Only lists shared with it are reachable.
+
+### 2. Secret
+
+Create a Secrets Manager secret (default name `bring-mcp/config`) with JSON like:
+
+```json
+{
+  "BRING_EMAIL": "second-account@example.com",
+  "BRING_PASSWORD": "its-password",
+  "AUTH_PASSPHRASE": "at least 12 chars - use 20+ random characters",
+  "JWT_SECRET": "at least 32 random characters"
+}
+```
+
+Generate the last two with e.g. `openssl rand -base64 32`.
+
+### 3. Build and deploy
+
+```bash
+npm ci
+npm run build:lambda
+sam deploy --guided
+```
+
+The stack outputs `McpUrl` (the Function URL plus `/mcp`). The issuer is detected from the request host, so no second
+deploy is needed. Set `PublicBaseUrl` only if you front the function with a custom domain.
+
+### 4. Connect a client
+
+- **Claude**: Settings -> Connectors -> Add custom connector -> paste `McpUrl`.
+- **ChatGPT**: add a custom connector / app with the `McpUrl`, authentication OAuth.
+- **Claude Code**: `claude mcp add --transport http bring <McpUrl>`
+
+When prompted, enter your `AUTH_PASSPHRASE` on the consent page.
+
+### Security notes
+
+- Anyone who knows the passphrase acts as the shared Bring! account. Use a long random one.
+- Tokens cannot be revoked individually; rotate `JWT_SECRET` in Secrets Manager (and redeploy or wait for a cold start)
+  to revoke all of them. Access tokens last 1 hour, refresh tokens 14 days.
+- Wrong passphrase guesses are delayed by 1 second. Set up an AWS budget alert (and optionally `ReservedConcurrentExecutions` if your AWS account quota allows it) to cap parallel invocations.
+- Redirect URIs are restricted to an allow-list (`RedirectUriAllowlist` parameter; defaults cover claude.ai, claude.com,
+  chatgpt.com, Google/Gemini relay domains, and loopback addresses for local clients).
+- Do not log tokens or secrets; this code never does.

@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: bring-mcp - Bring! shopping list MCP server on AWS Lambda (Function URL, OAuth 2.1 with passphrase consent)
+
+Parameters:
+  SecretName:
+    Type: String
+    Default: bring-mcp/config
+    Description: >-
+      Name of an existing Secrets Manager secret holding JSON with the keys
+      BRING_EMAIL, BRING_PASSWORD, AUTH_PASSPHRASE (>=12 chars) and JWT_SECRET (>=32 chars).
+  PublicBaseUrl:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional public origin (no trailing slash), e.g. a custom domain. Leave empty to use the
+      Function URL hostname, which is detected automatically.
+  RedirectUriAllowlist:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional comma-separated OAuth redirect allow-list (exact URIs, prefixes ending in *, or "loopback").
+      Leave empty for the built-in ChatGPT/Claude defaults.
+
+Resources:
+  BringMcpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Handler: index.handler
+      CodeUri: dist/lambda/
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          SECRET_ID: !Ref SecretName
+          PUBLIC_BASE_URL: !Ref PublicBaseUrl
+          REDIRECT_URI_ALLOWLIST: !Ref RedirectUriAllowlist
+          NODE_OPTIONS: --enable-source-maps
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}-*
+      # Authentication is done by the function itself (OAuth 2.1 bearer tokens), so the URL itself is public.
+      FunctionUrlConfig:
+        AuthType: NONE
+
+Outputs:
+  McpUrl:
+    Description: MCP endpoint to add in ChatGPT / Claude
+    Value: !Sub '${BringMcpFunctionUrl.FunctionUrl}mcp'
